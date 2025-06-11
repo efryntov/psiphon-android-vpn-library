@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">Psiphon Library Name</string>
+    <string name="psiphon_service_channel_description">Psiphon Library Service Channel Description</string>
+    <string name="psiphon_service_stop_label_text">Stop</string>
+    <string name="psiphon_notification_connecting">Psiphon library default connecting notification text</string>
+    <string name="psiphon_notification_connected">Psiphon library default connected notification text</string>
+    <string name="psiphon_notification_waiting_for_network">Psiphon library default waiting for network notification text</string>
+    <string name="psiphon_notification_updating_parameters">Updating parameters…</string>
+    <string name="psiphon_notification_tunnel_stopping">Stopping…</string>
+    <string name="psiphon_notification_error_socks_proxy_port_is_not_set">Psiphon library error: SOCKS proxy port is not set</string>
+    <string name="psiphon_notification_error_http_proxy_port_already_in_use">Psiphon library error: HTTP proxy port %1$d already in use</string>
+    <string name="psiphon_notification_error_socks_proxy_port_already_in_use">Psiphon library error: SOCKS proxy port %1$d already in use</string>
+    <string name="psiphon_notification_error_vpn_revoked_by_user">Psiphon library error" VPN revoked by user</string>
+    <string name="psiphon_notification_error_failed_to_restart_tunnel">Psiphon library error: failed to restart tunnel</string>
+    <string name="psiphon_notification_error_failed_to_start_tunnel">Psiphon library error:  failed to start the tunnel</string>
+
+</resources>
