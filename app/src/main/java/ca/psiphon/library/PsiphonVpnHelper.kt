@@ -1,26 +1,21 @@
 package ca.psiphon.library
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.util.Log
-import androidx.activity.ComponentActivity
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import java.lang.ref.WeakReference
-import java.util.concurrent.atomic.AtomicReference
 
 sealed class VpnResult<out T> {
     data class Success<out T>(val value: T) : VpnResult<T>()
     data class Failure<out T>(val message: String) : VpnResult<T>()
+    data class NeedsPermission<out T>(val intent: Intent) : VpnResult<T>()
 }
 
 class PsiphonVpnHelper private constructor(
-    activityRef: WeakReference<ComponentActivity>,
-    private val applicationContext: Context,
+    private val contextRef: WeakReference<Context>,
     private val stateListener: PsiphonStateListener
 ) : DefaultLifecycleObserver {
 
@@ -28,14 +23,8 @@ class PsiphonVpnHelper private constructor(
         fun onStateUpdated(state: PsiphonState)
     }
 
-    private val activityRef = AtomicReference(activityRef)
+    private var lifecycleOwner: LifecycleOwner? = null
     private val psiphonComms: PsiphonComms
-    private val pendingStartParams = AtomicReference<PsiphonServiceParameters?>()
-
-    @Volatile
-    private var pendingStartCallback: ((VpnResult<String>) -> Unit)? = null
-
-    private var vpnPermissionLauncher: ActivityResultLauncher<Intent>? = null
 
     private val internalStateListener = object : PsiphonComms.PsiphonStateListener {
         override fun onStateUpdated(state: PsiphonState) {
@@ -51,24 +40,18 @@ class PsiphonVpnHelper private constructor(
         private val TAG = PsiphonVpnHelper::class.java.simpleName
 
         fun create(
-            activity: ComponentActivity,
+            context: Context,
+            lifecycleOwner: LifecycleOwner,
             stateListener: PsiphonStateListener
         ): PsiphonVpnHelper {
             val helper = PsiphonVpnHelper(
-                WeakReference(activity),
-                activity.applicationContext,
+                WeakReference(context),
                 stateListener
             )
 
-            // Register VPN permission launcher
-            helper.vpnPermissionLauncher = activity.registerForActivityResult(
-                ActivityResultContracts.StartActivityForResult()
-            ) { result ->
-                helper.handleVpnPermissionResult(result.resultCode)
-            }
-
-            // Observe activity lifecycle for automatic cleanup
-            activity.lifecycle.addObserver(helper)
+            helper.lifecycleOwner = lifecycleOwner
+            // Auto-bind to lifecycle
+            lifecycleOwner.lifecycle.addObserver(helper)
 
             return helper
         }
@@ -82,24 +65,32 @@ class PsiphonVpnHelper private constructor(
         params: PsiphonServiceParameters? = null,
         callback: (VpnResult<String>) -> Unit
     ) {
-        val activity = getActivity() ?: run {
-            callback(VpnResult.Failure("Activity is no longer available"))
+        val context = getContext() ?: run {
+            callback(VpnResult.Failure("Context is no longer available"))
             return
         }
 
-        if (isVpnPermissionGranted()) {
-            callback(startVpnInternal(params))
+        // Check if VPN permission is needed
+        val intent = VpnService.prepare(context)
+        if (intent != null) {
+            // Need permission - hand off to plugin layer
+            callback(VpnResult.NeedsPermission(intent))
         } else {
-            requestVpnPermission(params, callback)
+            // Permission already granted - start immediately
+            callback(startVpnInternal(params))
         }
     }
 
     fun stopVpn(callback: (VpnResult<String>) -> Unit) {
+        val context = getContext() ?: run {
+            callback(VpnResult.Failure("Context is no longer available"))
+            return
+        }
+
         try {
-            // Just stop the VPN service - communication stays active
-            PsiphonComms.stopPsiphon(applicationContext)
+            PsiphonComms.stopPsiphon(context)
             Log.d(TAG, "VPN stop initiated")
-            callback(VpnResult.Success("VPN stop initiated"))
+            callback(VpnResult.Success("VPN stopped successfully"))
         } catch (e: Exception) {
             callback(VpnResult.Failure("Failed to stop VPN: ${e.message ?: "Unknown error"}"))
         }
@@ -109,10 +100,15 @@ class PsiphonVpnHelper private constructor(
         params: PsiphonServiceParameters,
         callback: (VpnResult<String>) -> Unit
     ) {
+        val context = getContext() ?: run {
+            callback(VpnResult.Failure("Context is no longer available"))
+            return
+        }
+
         try {
-            PsiphonComms.updatePsiphonParameters(applicationContext, params)
+            PsiphonComms.updatePsiphonParameters(context, params)
             Log.d(TAG, "Parameters updated")
-            callback(VpnResult.Success("Parameters updated"))
+            callback(VpnResult.Success("Parameters updated successfully"))
         } catch (e: Exception) {
             callback(VpnResult.Failure("Failed to update parameters: ${e.message ?: "Unknown error"}"))
         }
@@ -121,86 +117,30 @@ class PsiphonVpnHelper private constructor(
     fun cleanup() {
         Log.d(TAG, "Cleaning up PsiphonVpnHelper")
 
-        // Stop communication but not the VPN service itself
-        psiphonComms.stop(applicationContext)
+        lifecycleOwner?.lifecycle?.removeObserver(this)
+        lifecycleOwner = null
 
-        // Clear activity reference
-        activityRef.set(WeakReference(null))
-
-        // Clear pending params
-        pendingStartParams.set(null)
-
-        // Clear pending callback
-        pendingStartCallback = null
-
-        // Remove from activity lifecycle if still attached
-        getActivity()?.lifecycle?.removeObserver(this)
+        val context = getContext()
+        if (context != null) {
+            psiphonComms.stop(context)
+        }
+        contextRef.clear()
     }
 
     // Private methods
-    private fun isVpnPermissionGranted(): Boolean {
-        val activity = getActivity() ?: return false
-        return try {
-            VpnService.prepare(activity) == null
-        } catch (e: Exception) {
-            false // If we can't check the permission, assume it's not granted
-        }
-    }
-
-    private fun getActivity(): ComponentActivity? {
-        return activityRef.get()?.get()
-    }
-
-    private fun requestVpnPermission(
-        params: PsiphonServiceParameters?,
-        callback: (VpnResult<String>) -> Unit) {
-        val activity = getActivity() ?: run {
-            callback(VpnResult.Failure("Activity is no longer available"))
-            return
-        }
-        val intent = VpnService.prepare(activity)
-        if (intent != null) {
-            // Store the callback and parameters until permission result is received
-            pendingStartCallback = callback
-            pendingStartParams.set(params)
-
-            Log.d(TAG, "Requesting VPN permission")
-            if (vpnPermissionLauncher == null) {
-                callback(VpnResult.Failure("VPN permission launcher not initialized"))
-                return
-            }
-            vpnPermissionLauncher!!.launch(intent)
-        } else {
-            // Permission already granted
-            callback(startVpnInternal(params))
-        }
-    }
-
-    private fun handleVpnPermissionResult(resultCode: Int) {
-        val callback = pendingStartCallback
-        pendingStartCallback = null
-
-        callback?.let { cb ->
-            if (resultCode == Activity.RESULT_OK) {
-                Log.d(TAG, "VPN permission granted")
-                val params = pendingStartParams.getAndSet(null)
-                cb(startVpnInternal(params))
-            } else {
-                Log.d(TAG, "VPN permission denied")
-                pendingStartParams.set(null)
-                cb(VpnResult.Failure("VPN permission denied by user"))
-            }
-        }
+    private fun getContext(): Context? {
+        return contextRef.get()
     }
 
     private fun startVpnInternal(params: PsiphonServiceParameters?): VpnResult<String> {
-        try {
-            // Just start the VPN service - communication is handled separately
-            PsiphonComms.startPsiphon(applicationContext, params)
+        val context = getContext() ?: return VpnResult.Failure("Context is no longer available")
+
+        return try {
+            PsiphonComms.startPsiphon(context, params)
             Log.d(TAG, "VPN start initiated")
-            return VpnResult.Success("VPN started successfully")
+            VpnResult.Success("VPN started successfully")
         } catch (e: Exception) {
-            return VpnResult.Failure("Failed to start VPN: ${e.message ?: "Unknown error"}")
+            VpnResult.Failure("Failed to start VPN: ${e.message ?: "Unknown error"}")
         }
     }
 
@@ -219,15 +159,23 @@ class PsiphonVpnHelper private constructor(
     }
 
     override fun onStart(owner: LifecycleOwner) {
-        psiphonComms.start(applicationContext)
+        Log.d(TAG, "Lifecycle: onStart - starting comms")
+        val context = getContext()
+        if (context != null) {
+            psiphonComms.start(context)
+        }
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        psiphonComms.stop(applicationContext)
+        Log.d(TAG, "Lifecycle: onStop - stopping comms")
+        val context = getContext()
+        if (context != null) {
+            psiphonComms.stop(context)
+        }
     }
 
     override fun onDestroy(owner: LifecycleOwner) {
-        Log.d(TAG, "Activity destroyed, cleaning up")
+        Log.d(TAG, "Lifecycle: onDestroy - cleaning up")
         cleanup()
     }
 }
