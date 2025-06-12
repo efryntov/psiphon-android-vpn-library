@@ -147,6 +147,11 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
                 INTENT_ACTION_STOP_PSIPHON -> handleStopAction()
                 INTENT_ACTION_START_PSIPHON -> handleStartAction(intent)
                 INTENT_ACTION_UPDATE_PSIPHON_PARAMETERS -> handleParamsChangedAction(intent)
+                SERVICE_INTERFACE -> {
+                    // Always ON VPN system call
+                    Log.d(TAG, "Always ON VPN system start")
+                    handleStartAction(intent)
+                }
                 else -> {
                     Log.d(TAG, "Unknown action: ${intent.action}")
                     stopForegroundAndService()
@@ -362,6 +367,7 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
         }
 
         Log.d(TAG, "Stopping tunnel")
+        updatePsiphonState { it.copy(tunnelEvent = TunnelEvent.STOPPING) }
 
         // Cancel the coroutine - this will trigger the finally block
         mainHandler.post {
@@ -372,6 +378,7 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
     private fun restartTunnel() {
         serviceScope.launch {
             try {
+                updatePsiphonState { it.copy(tunnelEvent = TunnelEvent.CONNECTING) }
                 psiphonTunnel.restartPsiphon()
             } catch (e: PsiphonTunnel.Exception) {
                 Log.e(TAG, "Failed to restart tunnel", e)
@@ -478,10 +485,6 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
 
             showErrorNotification(getStringResource("psiphon_notification_error_socks_proxy_port_is_not_set"))
         }
-    }
-
-    override fun onExiting() {
-        updatePsiphonState { it.copy(tunnelEvent = TunnelEvent.EXITING) }
     }
 
     override fun onStartedWaitingForNetworkConnectivity() {

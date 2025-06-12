@@ -96,5 +96,5 @@ enum class ErrorCode {
 }
 
 enum class TunnelEvent {
-    STOPPED, CONNECTING, CONNECTED, EXITING
+    STOPPED, CONNECTING, CONNECTED, STOPPING
 }
