@@ -413,6 +413,14 @@ class PsiphonVpnService : VpnService(), PsiphonTunnel.HostService {
 
             put("ClientVersion", versionCodeString)
 
+            // Apply dynamic parameters
+            PsiphonServiceParameters.loadStored(context)?.let { params ->
+                put("EgressRegion", params.egressRegionParameter)
+                Log.d(TAG, "Dynamic parameters applied: $params")
+            } ?: run {
+                Log.d(TAG, "No dynamic parameters found, using defaults")
+            }
+
             // Set data directory
             val dataDir = Utils.dataRootDirectory(this@PsiphonVpnService)
             put("DataRootDirectory", dataDir.absolutePath)
