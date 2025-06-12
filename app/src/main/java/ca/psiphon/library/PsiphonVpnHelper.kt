@@ -204,20 +204,29 @@ class PsiphonVpnHelper private constructor(
         }
     }
 
-    // Lifecycle methods
+
+    // Lifecycle methods - must implement DefaultLifecycleObserver in full
+    override fun onCreate(owner: LifecycleOwner) {
+        Log.d(TAG, "Lifecycle: onCreate")
+    }
+
+    override fun onResume(owner: LifecycleOwner) {
+        Log.d(TAG, "Lifecycle: onResume")
+    }
+
+    override fun onPause(owner: LifecycleOwner) {
+        Log.d(TAG, "Lifecycle: onPause")
+    }
 
     override fun onStart(owner: LifecycleOwner) {
-        super.onStart(owner)
         psiphonComms.start(applicationContext)
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        super.onStop(owner)
         psiphonComms.stop(applicationContext)
     }
 
     override fun onDestroy(owner: LifecycleOwner) {
-        super.onDestroy(owner)
         Log.d(TAG, "Activity destroyed, cleaning up")
         cleanup()
     }
